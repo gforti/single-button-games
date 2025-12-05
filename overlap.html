@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Christmas Overlap Game</title>
+    <!-- Load Tailwind CSS for simple styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Apply a festive font and ensure full viewport coverage */
+        @import url('https://fonts.googleapis.com/css2?family=Luckiest+Guy&display=swap');
+        :root {
+            --primary-red: #cc0000;
+            --primary-green: #008000;
+        }
+        body {
+            font-family: 'Luckiest Guy', cursive;
+            background-color: #f7f7f7;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* Game Container Styles */
+        #game-container {
+            position: relative;
+            width: 90vw; /* Responsive width */
+            max-width: 400px; /* Max width for desktop */
+            aspect-ratio: 1 / 1; /* Keep it square */
+            background-color: #ffffff;
+            border: 8px solid var(--primary-red);
+            border-radius: 20px;
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.5);
+            overflow: hidden;
+        }
+
+        /* Moving Word Styles */
+        .word {
+            position: absolute;
+            font-size: 2rem; /* Adjusted font size for "CHRISTMAS" */
+            font-weight: bold;
+            line-height: 1;
+            padding: 5px;
+            text-shadow: 2px 2px 0 #000;
+            user-select: none;
+            cursor: pointer;
+            will-change: transform; /* Performance boost for animation */
+            white-space: nowrap;
+        }
+
+        /* Horizontal word (Moves Left/Right, Centered Vertically) */
+        #word-h {
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--primary-green);
+        }
+
+        /* Vertical word (Moves Up/Down, Centered Horizontally) - No rotation now */
+        #word-v {
+            left: 50%;
+            transform: translateX(-50%); /* Center horizontally, no rotation */
+            color: var(--primary-red);
+        }
+
+        /* Button Styling */
+        #stop-button {
+            transition: all 0.15s ease;
+            box-shadow: 0 6px 0 var(--primary-green);
+        }
+        #stop-button:active {
+            box-shadow: 0 2px 0 var(--primary-green);
+            transform: translateY(4px);
+        }
+
+        /* Result Display */
+        #result-display {
+            opacity: 0;
+            transition: opacity 0.5s ease;
+            pointer-events: none;
+        }
+        .show-result {
+            opacity: 1 !important;
+        }
+
+        /* Media Query for larger screens */
+        @media (min-width: 640px) {
+            .word {
+                font-size: 3rem;
+            }
+        }
+    </style>
+</head>
+<body class="bg-gray-900 flex flex-col p-4">
+
+    <h1 class="text-4xl sm:text-5xl mb-6 text-yellow-300 drop-shadow-lg text-center">
+        🎄 Christmas Overlap 🎁
+    </h1>
+
+    <div id="game-container">
+        <!-- Horizontal Moving Word -->
+        <div id="word-h" class="word">CHRISTMAS</div>
+
+        <!-- Vertical Moving Word -->
+        <div id="word-v" class="word">CHRISTMAS</div>
+
+        <!-- Result/Message Overlay -->
+        <div id="result-display" class="absolute inset-0 bg-black bg-opacity-70 flex items-center justify-center show-result">
+            <div class="p-6 text-center rounded-xl border-4 border-white transform scale-90">
+                <p id="result-message" class="text-white text-3xl sm:text-4xl mb-4 leading-snug">Press START to begin!</p>
+                <p id="overlap-text" class="text-xl text-yellow-300">Target Overlap: > 90%</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Controls and Score -->
+    <div class="mt-8 flex flex-col items-center w-full max-w-sm mx-auto">
+        <button id="stop-button"
+                class="w-full py-4 text-3xl rounded-xl text-white bg-red-600 hover:bg-red-700 active:bg-red-800 border-b-4 border-red-800 mb-4 transition-all duration-150 shadow-xl"
+                ontouchstart="this.classList.add('active')" ontouchend="this.classList.remove('active')">
+            START
+        </button>
+
+        <div id="score-display" class="text-xl text-white mt-4 p-3 bg-gray-800 rounded-lg shadow-inner w-full text-center">
+            Overlap: 0.00%
+        </div>
+    </div>
+
+
+    <script>
+        // --- GAME VARIABLES ---
+        const gameContainer = document.getElementById('game-container');
+        const wordH = document.getElementById('word-h');
+        const wordV = document.getElementById('word-v');
+        const stopButton = document.getElementById('stop-button');
+        const resultDisplay = document.getElementById('result-display');
+        const resultMessage = document.getElementById('result-message');
+        const scoreDisplay = document.getElementById('score-display');
+
+        let isGameRunning = false;
+        let isMoving = false;
+        let animationFrameId = null;
+
+        // Position and speed state
+        let posH = 0; // Horizontal word x position (relative to container width)
+        let posV = 0; // Vertical word y position (relative to container height)
+        // Reduced speed for a more generous challenge!
+        const speed = 0.003; 
+
+        // --- UTILITY FUNCTIONS (Audio placeholders kept for potential future use) ---
+
+        function base64ToArrayBuffer(base64) {
+            const binaryString = window.atob(base64);
+            const len = binaryString.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+            return bytes.buffer;
+        }
+
+        function pcmToWav(pcm16, sampleRate) {
+            const buffer = new ArrayBuffer(44 + pcm16.length * 2);
+            const view = new DataView(buffer);
+
+            /* RIFF identifier */
+            view.setUint32(0, 0x52494646, false);
+            /* file length */
+            view.setUint32(4, 36 + pcm16.length * 2, false);
+            /* RIFF type */
+            view.setUint32(8, 0x57415645, false);
+            /* format chunk identifier */
+            view.setUint32(12, 0x666d7420, false);
+            /* format chunk length */
+            view.setUint32(16, 16, true);
+            /* sample format (1 = PCM) */
+            view.setUint16(20, 1, true);
+            /* channel count */
+            view.setUint16(22, 1, true);
+            /* sample rate */
+            view.setUint32(24, sampleRate, true);
+            /* byte rate (sample rate * block align) */
+            view.setUint32(28, sampleRate * 2, true);
+            /* block align (channels * bytes per sample) */
+            view.setUint16(32, 2, true);
+            /* bits per sample */
+            view.setUint16(34, 16, true);
+            /* data chunk identifier */
+            view.setUint32(36, 0x64617461, false);
+            /* data chunk length */
+            view.setUint32(40, pcm16.length * 2, true);
+
+            // Write PCM data
+            let offset = 44;
+            for (let i = 0; i < pcm16.length; i++, offset += 2) {
+                view.setInt16(offset, pcm16[i], true);
+            }
+
+            return new Blob([view], { type: 'audio/wav' });
+        }
+
+
+        // --- GAME LOGIC ---
+
+        /**
+         * Calculates the percentage overlap between the two word elements.
+         * The percentage is calculated relative to the area of the stationary/target word (wordV).
+         * Since both words are now horizontal, they should have the same area when unrotated.
+         * @returns {number} The overlap percentage (0.0 to 100.0)
+         */
+        function calculateOverlap() {
+            // getBoundingClientRect is robust and works even without rotation
+            const rectH = wordH.getBoundingClientRect();
+            const rectV = wordV.getBoundingClientRect();
+
+            // 1. Calculate Intersection Coordinates
+            const intersectX1 = Math.max(rectH.left, rectV.left);
+            const intersectY1 = Math.max(rectH.top, rectV.top);
+            const intersectX2 = Math.min(rectH.right, rectV.right);
+            const intersectY2 = Math.min(rectH.bottom, rectV.bottom);
+
+            // 2. Calculate Intersection Dimensions
+            const overlapWidth = intersectX2 - intersectX1;
+            const overlapHeight = intersectY2 - intersectY1;
+
+            // 3. Calculate Intersection Area (If dimensions are non-negative)
+            const areaOverlap = (overlapWidth > 0 && overlapHeight > 0)
+                ? overlapWidth * overlapHeight
+                : 0;
+
+            // 4. Calculate Reference Target Area (using the vertical word's area)
+            // Both words are identical in shape, so either width*height works for the target area.
+            const targetArea = rectV.width * rectV.height;
+
+            // 5. Calculate Percentage
+            let percentage = 0;
+            if (targetArea > 0) {
+                // Percentage of the target area covered by the overlap
+                percentage = (areaOverlap / targetArea) * 100;
+            }
+
+            // Cap at 100% just in case of floating point anomalies
+            return Math.min(100, percentage);
+        }
+
+        /**
+         * The main game loop for movement.
+         * @param {number} timestamp - The current time provided by requestAnimationFrame.
+         */
+        function gameLoop(timestamp) {
+            if (!isMoving) {
+                return;
+            }
+
+            // Time factor scaled by the new, slower speed
+            const timeFactor = timestamp * speed;
+
+            // Horizontal word (CHRISTMAS) movement: Left/Right
+            const containerWidth = gameContainer.offsetWidth - wordH.offsetWidth;
+            if (containerWidth > 0) {
+                 // Uses a sine wave to bounce back and forth
+                posH = Math.cos(timeFactor) * 0.5 + 0.5; // posH ranges from 0 to 1
+                wordH.style.left = `${posH * containerWidth}px`;
+            }
+
+            // Vertical word (CHRISTMAS) movement: Up/Down
+            const containerHeight = gameContainer.offsetHeight - wordV.offsetHeight;
+             if (containerHeight > 0) {
+                // Uses a sine wave (slightly different frequency for variety) to bounce back and forth
+                posV = Math.sin(timeFactor * 0.8) * 0.5 + 0.5; // posV ranges from 0 to 1
+                wordV.style.top = `${posV * containerHeight}px`;
+            }
+
+            animationFrameId = requestAnimationFrame(gameLoop);
+        }
+
+        /**
+         * Initializes or resets the game state.
+         */
+        function resetGame() {
+            isGameRunning = true;
+            isMoving = false;
+            if (animationFrameId) {
+                cancelAnimationFrame(animationFrameId);
+            }
+
+            // Reset positions
+            wordH.style.left = '0px';
+            wordV.style.top = '0px';
+            posH = 0;
+            posV = 0;
+
+            // Reset UI
+            stopButton.textContent = 'START';
+            stopButton.onclick = startGame;
+            scoreDisplay.textContent = 'Overlap: 0.00%';
+            resultDisplay.classList.add('show-result');
+            resultMessage.textContent = 'Press START to align the words!';
+            resultDisplay.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+        }
+
+        /**
+         * Starts the continuous movement of the words.
+         */
+        function startGame() {
+            if (!isGameRunning) return;
+
+            isMoving = true;
+            resultDisplay.classList.remove('show-result');
+            stopButton.textContent = 'STOP!';
+            stopButton.onclick = stopGame;
+
+            // Start the animation loop
+            if (animationFrameId) {
+                cancelAnimationFrame(animationFrameId);
+            }
+            animationFrameId = requestAnimationFrame(gameLoop);
+        }
+
+        /**
+         * Stops the movement and checks the result.
+         */
+        function stopGame() {
+            if (!isMoving || !isGameRunning) return;
+
+            isMoving = false;
+            if (animationFrameId) {
+                cancelAnimationFrame(animationFrameId);
+            }
+
+            // 1. Calculate Score
+            const overlapPercent = calculateOverlap();
+            scoreDisplay.textContent = `Overlap: ${overlapPercent.toFixed(2)}%`;
+
+            // 2. Determine Result
+            const WIN_THRESHOLD = 90;
+
+            if (overlapPercent >= WIN_THRESHOLD) {
+                resultMessage.textContent = `PERFECT ALIGNMENT! You hit ${overlapPercent.toFixed(2)}% overlap!`;
+                resultDisplay.style.backgroundColor = 'rgba(0, 128, 0, 0.8)'; // Green for Win
+            } else {
+                const required = (WIN_THRESHOLD - overlapPercent).toFixed(2);
+                resultMessage.textContent = `MISSED IT! Only ${overlapPercent.toFixed(2)}% overlap. Try to get ${required}% closer.`;
+                resultDisplay.style.backgroundColor = 'rgba(204, 0, 0, 0.8)'; // Red for Loss
+            }
+
+            // 3. Update UI for next round
+            resultDisplay.classList.add('show-result');
+            stopButton.textContent = 'PLAY AGAIN';
+            stopButton.onclick = resetGame;
+            isGameRunning = false;
+        }
+
+        // --- INITIALIZATION ---
+
+        window.onload = resetGame;
+
+    </script>
+</body>
+</html>

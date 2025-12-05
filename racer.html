@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Two-Lane Racer</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            background-color: #1a1a1a;
+            color: #fff;
+            font-family: 'Press Start 2P', cursive;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        #game-container {
+            width: 100%;
+            max-width: 400px; /* Standard mobile width */
+            height: 100vh;
+            max-height: 800px;
+            box-shadow: 0 0 40px rgba(0, 255, 255, 0.5);
+            border: 4px solid #00ffff;
+            background-color: #000;
+            position: relative;
+            overflow: hidden;
+        }
+
+        #game-canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            touch-action: none; /* Prevent browser actions on touch/swipe */
+        }
+
+        #overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.8);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            transition: opacity 0.3s ease;
+            z-index: 10;
+        }
+
+        #overlay.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .score-display {
+            position: absolute;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #fff;
+            font-size: 1.2rem;
+            text-shadow: 0 0 5px #ff00ff;
+            z-index: 5;
+        }
+
+        .high-score-display {
+            position: absolute;
+            top: 40px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #aaa;
+            font-size: 0.7rem;
+            z-index: 5;
+        }
+
+        h1 {
+            color: #00ffff;
+            font-size: 1.5rem;
+            margin-bottom: 20px;
+            text-shadow: 0 0 10px #00ffff;
+        }
+
+        p {
+            font-size: 0.8rem;
+            margin-top: 10px;
+            margin-bottom: 20px;
+            max-width: 80%;
+        }
+
+        .main-button {
+            padding: 15px 30px;
+            font-size: 1rem;
+            background-color: #ff00ff;
+            color: #fff;
+            border: 4px solid #fff;
+            border-radius: 10px;
+            cursor: pointer;
+            box-shadow: 0 6px 0 #a000a0;
+            transition: all 0.1s;
+        }
+
+        .main-button:active {
+            box-shadow: 0 2px 0 #a000a0;
+            transform: translateY(4px);
+        }
+
+        /* Responsive adjustments */
+        @media (max-width: 400px) {
+            h1 { font-size: 1.2rem; }
+            p { font-size: 0.6rem; }
+            .main-button { padding: 12px 24px; font-size: 0.8rem; }
+            .score-display { font-size: 1rem; }
+            .high-score-display { font-size: 0.6rem; }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <!-- Score displays -->
+        <div class="score-display">SCORE: <span id="score">0</span></div>
+        <div class="high-score-display">HIGH: <span id="high-score">0</span></div>
+
+        <!-- The game canvas -->
+        <canvas id="game-canvas"></canvas>
+
+        <!-- Overlay for start/game over screen -->
+        <div id="overlay">
+            <h1 id="overlay-title">TWO-LANE RACER</h1>
+            <p id="overlay-message">Press the button, SPACE, or TAP anywhere to start and switch between lanes! Avoid obstacles!</p>
+            <button id="start-button" class="main-button">START / SWITCH LANE</button>
+        </div>
+    </div>
+
+    <script>
+        // --- GAME INITIALIZATION ---
+        const canvas = document.getElementById('game-canvas');
+        const ctx = canvas.getContext('2d');
+        const overlay = document.getElementById('overlay');
+        const overlayTitle = document.getElementById('overlay-title');
+        const overlayMessage = document.getElementById('overlay-message');
+        const startButton = document.getElementById('start-button');
+        const scoreDisplay = document.getElementById('score');
+        const highScoreDisplay = document.getElementById('high-score');
+
+        // Global game state
+        let game = {
+            isRunning: false,
+            score: 0,
+            highScore: 0,
+            animationFrameId: null,
+            lastTime: 0,
+            deltaTime: 0,
+            lastLaneSwitchTime: 0,
+            laneSwitchCooldown: 250, // milliseconds: prevents rapid-fire switching
+            isGameOver: false,
+        };
+
+        // Configuration
+        const config = {
+            // Lane index 0: Left Lane (offset multiplier -1)
+            // Lane index 1: Right Lane (offset multiplier 1)
+            laneOffsets: [-1, 1], 
+            laneWidth: 200, // Total width of the road for the car to move in (excluding boundaries)
+            carColor: '#00ffff',
+            roadColor: '#333333',
+            dividerColor: '#ffff00',
+            baseSpeed: 150, // units per second (pixels approx)
+            speedIncreaseRate: 0.08, // Speed multiplier increase per score point
+            obstacleSpawnRate: 1.2, // Spawn attempts per second
+            minObstacleGap: 0.25, // CRITICAL CHANGE: Min vertical gap between obstacles (25% of screen height)
+            laneTransitionSpeed: 8, // How fast the car moves to the target lane (Higher = faster, 8 is a smooth transition)
+            obstacleTypes: [
+                { type: 'car', color: '#ff0000', widthRatio: 0.6, heightRatio: 0.1, scoreValue: 10 },
+                { type: 'pothole', color: '#000000', widthRatio: 0.4, heightRatio: 0.03, scoreValue: 15 },
+                { type: 'barricade', color: '#ffffff', widthRatio: 0.7, heightRatio: 0.05, scoreValue: 20 }
+            ]
+        };
+
+        // Player object
+        let player = {
+            currentLane: 0, // 0 for left, 1 for right
+            x: 0, // Current Center x position (absolute on canvas)
+            targetX: 0, // Target Center x position for smooth movement
+            y: 0, // Center y position (absolute on canvas)
+            width: 0,
+            height: 0,
+            targetRotation: 0,
+            currentRotation: 0,
+        };
+
+        // Obstacle array
+        let obstacles = [];
+        let timeSinceLastObstacle = 0;
+
+        // --- UTILITY FUNCTIONS ---
+
+        function loadHighScore() {
+            const storedScore = localStorage.getItem('oneButtonRacerHighScore');
+            game.highScore = storedScore ? parseInt(storedScore) : 0;
+            highScoreDisplay.textContent = game.highScore;
+        }
+
+        function saveHighScore() {
+            if (game.score > game.highScore) {
+                game.highScore = game.score;
+                localStorage.setItem('oneButtonRacerHighScore', game.highScore);
+                highScoreDisplay.textContent = game.highScore;
+            }
+        }
+
+        // Adjust canvas size and derived game object dimensions
+        function resizeCanvas() {
+            const container = document.getElementById('game-container');
+            // Ensure canvas matches container dimensions
+            canvas.width = container.clientWidth;
+            canvas.height = container.clientHeight;
+
+            // Recalculate player dimensions (max width of car is 10% of canvas width)
+            player.width = Math.max(20, Math.min(canvas.width * 0.1, 40)); 
+            player.height = Math.max(40, Math.min(canvas.height * 0.1, 80));
+            
+            // Fixed vertical position (center of car is at 85% down the screen)
+            player.y = canvas.height * 0.85; 
+            
+            // Update player target position based on current lane
+            player.targetX = getLaneX(player.currentLane);
+            player.x = player.targetX; // Set current x instantly on resize
+        }
+
+        // Get the absolute x position for a given lane index (0 or 1)
+        function getLaneX(laneIndex) {
+            // laneOffsets[0] is -1 (Left), laneOffsets[1] is 1 (Right)
+            const offsetMultiplier = config.laneOffsets[laneIndex]; 
+            // Calculate X based on road center + half the lane width
+            return canvas.width / 2 + (offsetMultiplier * config.laneWidth / 2);
+        }
+
+        // --- GAME LOGIC ---
+
+        function initGame() {
+            loadHighScore();
+            resizeCanvas(); 
+            window.addEventListener('resize', resizeCanvas);
+            
+            // Reset state
+            game.isRunning = false;
+            game.score = 0;
+            game.isGameOver = false;
+            obstacles = [];
+            timeSinceLastObstacle = 0;
+            scoreDisplay.textContent = Math.floor(game.score);
+
+            // Set initial player position to the left lane (0)
+            player.currentLane = 0;
+            player.targetX = getLaneX(player.currentLane); 
+            player.x = player.targetX; // Start position is target position
+
+            // Show initial overlay
+            overlayTitle.textContent = "TWO-LANE RACER";
+            overlayMessage.innerHTML = "Press the button, SPACE, or TAP anywhere to start and switch between lanes! Avoid obstacles!";
+            overlay.classList.remove('hidden');
+        }
+
+        function startGame() {
+            if (game.isRunning) return;
+
+            game.isRunning = true;
+            game.isGameOver = false;
+            game.score = 0;
+            game.lastTime = performance.now();
+            obstacles = [];
+            timeSinceLastObstacle = 0;
+            overlay.classList.add('hidden');
+            
+            // Reset player state
+            player.currentLane = 0;
+            player.targetX = getLaneX(player.currentLane);
+            player.x = player.targetX;
+            player.currentRotation = 0;
+            player.targetRotation = 0;
+
+            // Start the main game loop
+            gameLoop(game.lastTime); 
+        }
+
+        function gameOver() {
+            if (game.isGameOver) return;
+            game.isGameOver = true;
+            game.isRunning = false;
+
+            cancelAnimationFrame(game.animationFrameId);
+            saveHighScore();
+
+            overlayTitle.textContent = "CRASHED! GAME OVER";
+            overlayMessage.innerHTML = `Final Score: ${Math.floor(game.score)}<br><br>High Score: ${game.highScore}<br><br>Press START / SWITCH LANE to try again!`;
+            overlay.classList.remove('hidden');
+        }
+
+        function switchLane() {
+            const now = performance.now();
+            if (game.isRunning && (now - game.lastLaneSwitchTime > game.laneSwitchCooldown)) {
+                
+                const previousLane = player.currentLane;
+                // Toggle between lane 0 (Left) and lane 1 (Right)
+                player.currentLane = 1 - player.currentLane; 
+                
+                // Set rotation target based on direction
+                player.targetRotation = (player.currentLane > previousLane) ? 0.15 : -0.15;
+
+                // CRITICAL: Set the new target X for smooth transition
+                player.targetX = getLaneX(player.currentLane); 
+                game.lastLaneSwitchTime = now;
+            }
+        }
+
+        function update(deltaTime) {
+            if (!game.isRunning) return;
+
+            // Calculate Speed & Score
+            const scoreRate = 0.05;
+            // Speed increases based on the floor of the score
+            const speedMultiplier = 1 + Math.floor(game.score) * config.speedIncreaseRate / 100;
+            const currentSpeed = config.baseSpeed * speedMultiplier; 
+
+            game.score += deltaTime * scoreRate * currentSpeed;
+            scoreDisplay.textContent = Math.floor(game.score);
+
+            // --- Smooth Lane Movement ---
+            // Interpolate player.x towards player.targetX
+            const movementAmount = (player.targetX - player.x) * config.laneTransitionSpeed * deltaTime;
+            player.x += movementAmount;
+
+            // Smoothly ease rotation back to center (0)
+            player.currentRotation += (player.targetRotation - player.currentRotation) * 10 * deltaTime;
+            if (Math.abs(player.currentRotation) < 0.01) {
+                player.currentRotation = 0;
+                player.targetRotation = 0;
+            }
+
+
+            // --- Obstacle Generation ---
+            timeSinceLastObstacle += deltaTime;
+            const spawnInterval = 1 / config.obstacleSpawnRate; 
+
+            if (timeSinceLastObstacle >= spawnInterval) {
+                let shouldSpawn = true;
+                
+                if (obstacles.length > 0) {
+                    // Check if the last obstacle has moved far enough down the screen
+                    const lastObstacleY = obstacles[obstacles.length - 1].y;
+                    // CRITICAL: Use the higher gap setting
+                    const minGapY = canvas.height * config.minObstacleGap; 
+                    
+                    if (lastObstacleY < minGapY) { 
+                        shouldSpawn = false;
+                    }
+                }
+                
+                if (shouldSpawn) {
+                    timeSinceLastObstacle = 0;
+
+                    const laneIndex = Math.floor(Math.random() * 2); 
+                    const obstacleType = config.obstacleTypes[Math.floor(Math.random() * config.obstacleTypes.length)];
+
+                    // Obstacle size is relative to the lane width
+                    const obsWidth = config.laneWidth * 0.45 * obstacleType.widthRatio;
+                    const obsHeight = player.height * (obstacleType.heightRatio / 0.1);
+
+                    const obs = {
+                        lane: laneIndex,
+                        type: obstacleType.type,
+                        x: getLaneX(laneIndex),
+                        y: -obsHeight, // Start above the screen
+                        width: obsWidth,
+                        height: obsHeight,
+                        color: obstacleType.color,
+                        scoreValue: obstacleType.scoreValue,
+                    };
+                    obstacles.push(obs);
+                }
+            }
+
+
+            // --- Obstacle Update and Collision Check ---
+            for (let i = obstacles.length - 1; i >= 0; i--) {
+                const obs = obstacles[i];
+                
+                // Move obstacle down
+                obs.y += currentSpeed * deltaTime;
+
+                // Check for collision (AABB collision)
+                // Use player.targetX for collision check to align with the intended lane position,
+                // but for two lanes, checking the currentLane index is the most accurate way.
+                if (obs.lane === player.currentLane) {
+                    const playerLeft = player.x - player.width / 2;
+                    const playerRight = player.x + player.width / 2;
+                    const playerTop = player.y - player.height / 2;
+                    const playerBottom = player.y + player.height / 2;
+
+                    const obsLeft = obs.x - obs.width / 2;
+                    const obsRight = obs.x + obs.width / 2;
+                    const obsTop = obs.y - obs.height / 2;
+                    const obsBottom = obs.y + obs.height / 2;
+
+                    // Collision check
+                    if (playerLeft < obsRight && playerRight > obsLeft &&
+                        playerTop < obsBottom && playerBottom > obsTop) {
+                        
+                        gameOver();
+                        return; 
+                    }
+                }
+
+                // Remove off-screen obstacles
+                if (obs.y > canvas.height + obs.height) {
+                    obstacles.splice(i, 1);
+                }
+            }
+        }
+
+        // --- DRAWING FUNCTIONS ---
+
+        function drawRoad() {
+            ctx.fillStyle = config.roadColor;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            const centerLineX = canvas.width / 2;
+            const dividerWidth = 10;
+            const segmentHeight = 40;
+            const gapHeight = 40;
+            const totalSegment = segmentHeight + gapHeight;
+            
+            ctx.fillStyle = config.dividerColor;
+
+            // Calculate road position offset for parallax effect based on score/speed
+            const scrollOffset = (game.score * 10) % totalSegment;
+
+            // Draw SINGLE center divider line
+            for (let i = Math.floor(-canvas.height / totalSegment) - 1; i < canvas.height / totalSegment + 1; i++) {
+                // Calculate Y position based on scrolling offset
+                const y = Math.floor(i * totalSegment + scrollOffset);
+
+                // Draw the single divider exactly in the center
+                ctx.fillRect(centerLineX - dividerWidth / 2, y, dividerWidth, segmentHeight);
+            }
+        }
+
+        function drawPlayer() {
+            ctx.save();
+            ctx.translate(player.x, player.y);
+            ctx.rotate(player.currentRotation);
+
+            // Neon Glow Shadow
+            ctx.shadowBlur = 15;
+            ctx.shadowColor = config.carColor;
+
+            // Car body (A simple geometric shape)
+            ctx.fillStyle = config.carColor;
+            ctx.fillRect(-player.width / 2, -player.height / 2, player.width, player.height);
+
+            // Cockpit/Roof (for definition)
+            ctx.fillStyle = '#1c1c1c';
+            ctx.fillRect(-player.width * 0.3, -player.height * 0.4, player.width * 0.6, player.height * 0.4);
+            
+            // Draw front light triangle for direction/speed
+            ctx.beginPath();
+            ctx.moveTo(0, -player.height / 2);
+            ctx.lineTo(-player.width * 0.3, -player.height / 2 + 10);
+            ctx.lineTo(player.width * 0.3, -player.height / 2 + 10);
+            ctx.closePath();
+            ctx.fillStyle = '#00ffaa';
+            ctx.fill();
+
+            ctx.restore();
+            
+            // Reset shadows for next draw calls
+            ctx.shadowBlur = 0;
+            ctx.shadowColor = 'transparent';
+        }
+
+        function drawObstacle(obs) {
+            ctx.save();
+            ctx.translate(obs.x, obs.y);
+
+            // Apply shadow for depth
+            ctx.shadowBlur = 8;
+            ctx.shadowColor = obs.color;
+            
+            // Draw obstacle rectangle (centered)
+            ctx.fillStyle = obs.color;
+            ctx.fillRect(-obs.width / 2, -obs.height / 2, obs.width, obs.height);
+            
+            // Special rendering for Barricades (striped)
+            if (obs.type === 'barricade') {
+                ctx.fillStyle = '#000000';
+                for (let i = -1; i <= 1; i++) {
+                    ctx.fillRect(i * obs.width / 4, -obs.height / 2, obs.width / 8, obs.height);
+                }
+            } else if (obs.type === 'pothole') {
+                // Pothole is drawn as a dark depression
+                ctx.strokeStyle = '#222';
+                ctx.lineWidth = 5;
+                ctx.strokeRect(-obs.width / 2, -obs.height / 2, obs.width, obs.height);
+            }
+
+            ctx.restore();
+            
+            // Reset shadows
+            ctx.shadowBlur = 0;
+            ctx.shadowColor = 'transparent';
+        }
+
+        // --- MAIN GAME LOOP ---
+
+        function gameLoop(currentTime) {
+            if (game.lastTime === 0 && currentTime) {
+                game.lastTime = currentTime;
+            }
+
+            if (!game.isRunning) return;
+
+            // Calculate delta time in seconds
+            game.deltaTime = (currentTime - game.lastTime) / 1000;
+            game.lastTime = currentTime;
+            
+            // Cap delta time to prevent massive jumps after unfocusing
+            if (game.deltaTime > 0.1) game.deltaTime = 0.016; 
+
+            update(game.deltaTime);
+
+            // Drawing
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            drawRoad();
+            obstacles.forEach(drawObstacle);
+            drawPlayer();
+
+            // Request next frame
+            game.animationFrameId = requestAnimationFrame(gameLoop);
+        }
+
+        // --- INPUT HANDLING ---
+
+        function handleInput(event) {
+            if (event.type === 'touchstart' || event.type === 'click' || event.code) {
+                 event.preventDefault();
+            }
+
+            if (game.isGameOver) {
+                startGame();
+            } else if (game.isRunning) {
+                switchLane();
+            } else {
+                startGame();
+            }
+        }
+
+        // --- EVENT LISTENERS ---
+
+        // Button input
+        startButton.addEventListener('click', handleInput);
+
+        // Canvas Click/Touch input (The one-button control)
+        canvas.addEventListener('click', handleInput);
+        canvas.addEventListener('touchstart', handleInput, { passive: false });
+
+
+        // Keyboard input (Spacebar, Enter, or Arrow Keys)
+        document.addEventListener('keydown', (event) => {
+            if (event.code === 'Space' || event.code === 'Enter' || event.code.startsWith('Arrow')) {
+                handleInput(event);
+            }
+        });
+
+        // --- START APPLICATION ---
+        window.onload = function() {
+            initGame();
+        };
+
+    </script>
+</body>
+</html>
