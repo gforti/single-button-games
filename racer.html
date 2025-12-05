@@ -121,6 +121,8 @@
             .high-score-display { font-size: 0.6rem; }
         }
     </style>
+    <!-- Include Tone.js for audio management -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.min.js"></script>
 </head>
 <body>
 
@@ -176,7 +178,7 @@
             baseSpeed: 150, // units per second (pixels approx)
             speedIncreaseRate: 0.08, // Speed multiplier increase per score point
             obstacleSpawnRate: 1.2, // Spawn attempts per second
-            minObstacleGap: 0.25, // CRITICAL CHANGE: Min vertical gap between obstacles (25% of screen height)
+            minObstacleGap: 0.25, // Min vertical gap between obstacles (25% of screen height)
             laneTransitionSpeed: 8, // How fast the car moves to the target lane (Higher = faster, 8 is a smooth transition)
             obstacleTypes: [
                 { type: 'car', color: '#ff0000', widthRatio: 0.6, heightRatio: 0.1, scoreValue: 10 },
@@ -200,6 +202,72 @@
         // Obstacle array
         let obstacles = [];
         let timeSinceLastObstacle = 0;
+        
+        // --- AUDIO MANAGER ---
+        const Audio = (() => {
+            let switchSynth;
+            let crashNoise;
+
+            // Function to ensure audio context starts on user interaction
+            const ensureAudioContext = () => {
+                 if (Tone.context.state !== 'running') {
+                     Tone.start();
+                 }
+            };
+
+            // Initialize all audio components
+            const init = () => {
+                // Set master volume
+                Tone.getDestination().volume.value = -10; 
+
+                // Synth for quick SFX (Lane Switch)
+                switchSynth = new Tone.MembraneSynth({
+                    pitchDecay: 0.01,
+                    octaves: 2,
+                    envelope: {
+                        attack: 0.001,
+                        decay: 0.1,
+                        sustain: 0.0,
+                        release: 0.05
+                    }
+                }).toDestination();
+
+                // Noise for Crash SFX
+                crashNoise = new Tone.NoiseSynth({
+                    noise: {
+                        type: "pink"
+                    },
+                    envelope: {
+                        attack: 0.01,
+                        decay: 0.3,
+                        sustain: 0,
+                        release: 0.1
+                    }
+                }).toDestination();
+            };
+
+            const playSwitch = () => {
+                ensureAudioContext();
+                try {
+                    switchSynth.triggerAttackRelease("G5", "16n");
+                } catch (e) { console.error("Audio failed to play switch SFX:", e); }
+            };
+
+            const playCrash = () => {
+                ensureAudioContext();
+                try {
+                    crashNoise.triggerAttackRelease("2n"); // Long noise burst
+                } catch (e) { console.error("Audio failed to play crash SFX:", e); }
+            };
+            
+            // NOTE: Music functions removed as requested
+
+            return { init, playSwitch, playCrash, ensureAudioContext };
+        })();
+        
+        // Initialize the audio modules once the script loads
+        Audio.init();
+
 
         // --- UTILITY FUNCTIONS ---
 
@@ -281,6 +349,9 @@
             timeSinceLastObstacle = 0;
             overlay.classList.add('hidden');
             
+            // Ensure audio context is running on start
+            Audio.ensureAudioContext();
+
             // Reset player state
             player.currentLane = 0;
             player.targetX = getLaneX(player.currentLane);
@@ -299,6 +370,9 @@
 
             cancelAnimationFrame(game.animationFrameId);
             saveHighScore();
+            
+            // Play crash SFX (no music to stop)
+            Audio.playCrash();
 
             overlayTitle.textContent = "CRASHED! GAME OVER";
             overlayMessage.innerHTML = `Final Score: ${Math.floor(game.score)}<br><br>High Score: ${game.highScore}<br><br>Press START / SWITCH LANE to try again!`;
@@ -316,9 +390,12 @@
                 // Set rotation target based on direction
                 player.targetRotation = (player.currentLane > previousLane) ? 0.15 : -0.15;
 
-                // CRITICAL: Set the new target X for smooth transition
+                // Set the new target X for smooth transition
                 player.targetX = getLaneX(player.currentLane); 
                 game.lastLaneSwitchTime = now;
+                
+                // Play lane switch sound
+                Audio.playSwitch();
             }
         }
 
@@ -357,7 +434,7 @@
                 if (obstacles.length > 0) {
                     // Check if the last obstacle has moved far enough down the screen
                     const lastObstacleY = obstacles[obstacles.length - 1].y;
-                    // CRITICAL: Use the higher gap setting
+                    // Use the higher gap setting (25% of screen height)
                     const minGapY = canvas.height * config.minObstacleGap; 
                     
                     if (lastObstacleY < minGapY) { 
@@ -398,8 +475,6 @@
                 obs.y += currentSpeed * deltaTime;
 
                 // Check for collision (AABB collision)
-                // Use player.targetX for collision check to align with the intended lane position,
-                // but for two lanes, checking the currentLane index is the most accurate way.
                 if (obs.lane === player.currentLane) {
                     const playerLeft = player.x - player.width / 2;
                     const playerRight = player.x + player.width / 2;
