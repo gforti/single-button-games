@@ -6,6 +6,8 @@
     <title>Christmas Overlap Game</title>
     <!-- Load Tailwind CSS for simple styling -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load Tone.js for audio effects -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.min.js"></script>
     <style>
         /* Apply a festive font and ensure full viewport coverage */
         @import url('https://fonts.googleapis.com/css2?family=Luckiest+Guy&display=swap');
@@ -82,6 +84,37 @@
         .show-result {
             opacity: 1 !important;
         }
+        
+        /* --- Confetti Styles --- */
+        #confetti-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            overflow: hidden;
+            z-index: 10;
+        }
+        
+        .confetto {
+            position: absolute;
+            width: 8px;
+            height: 8px;
+            background-color: #ffcc00; /* Gold */
+            border-radius: 50%;
+            opacity: 0;
+            animation: confetti-fall 3s ease-in forwards;
+        }
+        
+        .c-red { background-color: var(--primary-red); }
+        .c-green { background-color: var(--primary-green); }
+        .c-white { background-color: #ffffff; border: 1px solid #ddd; }
+
+        @keyframes confetti-fall {
+            0% { opacity: 1; transform: translateY(-10vh) rotate(0deg); }
+            100% { opacity: 0; transform: translateY(100vh) rotate(720deg); }
+        }
 
         /* Media Query for larger screens */
         @media (min-width: 640px) {
@@ -98,6 +131,9 @@
     </h1>
 
     <div id="game-container">
+        <!-- Confetti container must be inside game-container for localized effect -->
+        <div id="confetti-container"></div>
+        
         <!-- Horizontal Moving Word -->
         <div id="word-h" class="word">CHRISTMAS</div>
 
@@ -136,6 +172,7 @@
         const resultDisplay = document.getElementById('result-display');
         const resultMessage = document.getElementById('result-message');
         const scoreDisplay = document.getElementById('score-display');
+        const confettiContainer = document.getElementById('confetti-container');
 
         let isGameRunning = false;
         let isMoving = false;
@@ -144,139 +181,134 @@
         // Position and speed state
         let posH = 0; // Horizontal word x position (relative to container width)
         let posV = 0; // Vertical word y position (relative to container height)
-        // Reduced speed for a more generous challenge!
         const speed = 0.003; 
+        
+        // --- AUDIO SETUP (Tone.js) ---
+        // Initialize a simple synth
+        const synth = new Tone.PolySynth(Tone.Synth, {
+            oscillator: { type: "square" },
+            envelope: { release: 0.1 }
+        }).toDestination();
 
-        // --- UTILITY FUNCTIONS (Audio placeholders kept for potential future use) ---
+        let audioContextStarted = false;
 
-        function base64ToArrayBuffer(base64) {
-            const binaryString = window.atob(base64);
-            const len = binaryString.length;
-            const bytes = new Uint8Array(len);
-            for (let i = 0; i < len; i++) {
-                bytes[i] = binaryString.charCodeAt(i);
+        function startAudioContext() {
+            if (!audioContextStarted) {
+                Tone.start();
+                audioContextStarted = true;
+                // Play a quiet, high-frequency sound to confirm
+                synth.triggerAttackRelease("C6", "64n", Tone.now(), 0.01);
             }
-            return bytes.buffer;
         }
 
-        function pcmToWav(pcm16, sampleRate) {
-            const buffer = new ArrayBuffer(44 + pcm16.length * 2);
-            const view = new DataView(buffer);
+        function playWinSound() {
+            // Cheerful, rising notes
+            const now = Tone.now();
+            synth.triggerAttackRelease("C5", "8n", now);
+            synth.triggerAttackRelease("E5", "8n", now + 0.1);
+            synth.triggerAttackRelease("G5", "8n", now + 0.2);
+            synth.triggerAttackRelease("C6", "4n", now + 0.3);
+        }
 
-            /* RIFF identifier */
-            view.setUint32(0, 0x52494646, false);
-            /* file length */
-            view.setUint32(4, 36 + pcm16.length * 2, false);
-            /* RIFF type */
-            view.setUint32(8, 0x57415645, false);
-            /* format chunk identifier */
-            view.setUint32(12, 0x666d7420, false);
-            /* format chunk length */
-            view.setUint32(16, 16, true);
-            /* sample format (1 = PCM) */
-            view.setUint16(20, 1, true);
-            /* channel count */
-            view.setUint16(22, 1, true);
-            /* sample rate */
-            view.setUint32(24, sampleRate, true);
-            /* byte rate (sample rate * block align) */
-            view.setUint32(28, sampleRate * 2, true);
-            /* block align (channels * bytes per sample) */
-            view.setUint16(32, 2, true);
-            /* bits per sample */
-            view.setUint16(34, 16, true);
-            /* data chunk identifier */
-            view.setUint32(36, 0x64617461, false);
-            /* data chunk length */
-            view.setUint32(40, pcm16.length * 2, true);
+        function playLoseSound() {
+            // Low, dissonant tone
+            synth.triggerAttackRelease(["C3", "B2"], "4n", Tone.now(), 0.5);
+        }
+        
+        // --- CONFETTI LOGIC ---
+        const confettiColors = ['c-red', 'c-green', 'c-white'];
 
-            // Write PCM data
-            let offset = 44;
-            for (let i = 0; i < pcm16.length; i++, offset += 2) {
-                view.setInt16(offset, pcm16[i], true);
+        function launchConfetti() {
+            // Remove old confetti elements
+            confettiContainer.innerHTML = ''; 
+
+            const rect = gameContainer.getBoundingClientRect();
+            const centerX = rect.width / 2;
+            const centerY = rect.height / 2;
+
+            for (let i = 0; i < 50; i++) {
+                const confetto = document.createElement('div');
+                
+                // Assign random color class
+                const color = confettiColors[Math.floor(Math.random() * confettiColors.length)];
+                confetto.className = `confetto ${color}`;
+
+                // Randomize starting position around the center
+                const startX = centerX + (Math.random() - 0.5) * rect.width * 0.5;
+                const startY = centerY + (Math.random() - 0.5) * rect.height * 0.5;
+                
+                confetto.style.left = `${startX}px`;
+                confetto.style.top = `${startY}px`;
+                
+                // Slightly randomize animation delay and duration for a scattered look
+                const delay = Math.random() * 0.5;
+                const duration = 2.5 + Math.random() * 1.5;
+                
+                confetto.style.animationDelay = `${delay}s`;
+                confetto.style.animationDuration = `${duration}s`;
+                
+                confettiContainer.appendChild(confetto);
             }
-
-            return new Blob([view], { type: 'audio/wav' });
+            
+            // Cleanup confetti after animation ends
+            setTimeout(() => {
+                confettiContainer.innerHTML = '';
+            }, 4000);
         }
 
 
-        // --- GAME LOGIC ---
+        // --- GAME CORE LOGIC ---
 
-        /**
-         * Calculates the percentage overlap between the two word elements.
-         * The percentage is calculated relative to the area of the stationary/target word (wordV).
-         * Since both words are now horizontal, they should have the same area when unrotated.
-         * @returns {number} The overlap percentage (0.0 to 100.0)
-         */
         function calculateOverlap() {
-            // getBoundingClientRect is robust and works even without rotation
             const rectH = wordH.getBoundingClientRect();
             const rectV = wordV.getBoundingClientRect();
 
-            // 1. Calculate Intersection Coordinates
             const intersectX1 = Math.max(rectH.left, rectV.left);
             const intersectY1 = Math.max(rectH.top, rectV.top);
             const intersectX2 = Math.min(rectH.right, rectV.right);
             const intersectY2 = Math.min(rectH.bottom, rectV.bottom);
 
-            // 2. Calculate Intersection Dimensions
             const overlapWidth = intersectX2 - intersectX1;
             const overlapHeight = intersectY2 - intersectY1;
 
-            // 3. Calculate Intersection Area (If dimensions are non-negative)
             const areaOverlap = (overlapWidth > 0 && overlapHeight > 0)
                 ? overlapWidth * overlapHeight
                 : 0;
 
-            // 4. Calculate Reference Target Area (using the vertical word's area)
-            // Both words are identical in shape, so either width*height works for the target area.
             const targetArea = rectV.width * rectV.height;
 
-            // 5. Calculate Percentage
             let percentage = 0;
             if (targetArea > 0) {
-                // Percentage of the target area covered by the overlap
                 percentage = (areaOverlap / targetArea) * 100;
             }
 
-            // Cap at 100% just in case of floating point anomalies
             return Math.min(100, percentage);
         }
 
-        /**
-         * The main game loop for movement.
-         * @param {number} timestamp - The current time provided by requestAnimationFrame.
-         */
         function gameLoop(timestamp) {
             if (!isMoving) {
                 return;
             }
 
-            // Time factor scaled by the new, slower speed
             const timeFactor = timestamp * speed;
 
             // Horizontal word (CHRISTMAS) movement: Left/Right
             const containerWidth = gameContainer.offsetWidth - wordH.offsetWidth;
             if (containerWidth > 0) {
-                 // Uses a sine wave to bounce back and forth
-                posH = Math.cos(timeFactor) * 0.5 + 0.5; // posH ranges from 0 to 1
+                posH = Math.cos(timeFactor) * 0.5 + 0.5; 
                 wordH.style.left = `${posH * containerWidth}px`;
             }
 
             // Vertical word (CHRISTMAS) movement: Up/Down
             const containerHeight = gameContainer.offsetHeight - wordV.offsetHeight;
              if (containerHeight > 0) {
-                // Uses a sine wave (slightly different frequency for variety) to bounce back and forth
-                posV = Math.sin(timeFactor * 0.8) * 0.5 + 0.5; // posV ranges from 0 to 1
+                posV = Math.sin(timeFactor * 0.8) * 0.5 + 0.5; 
                 wordV.style.top = `${posV * containerHeight}px`;
             }
 
             animationFrameId = requestAnimationFrame(gameLoop);
         }
 
-        /**
-         * Initializes or resets the game state.
-         */
         function resetGame() {
             isGameRunning = true;
             isMoving = false;
@@ -299,27 +331,23 @@
             resultDisplay.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
         }
 
-        /**
-         * Starts the continuous movement of the words.
-         */
         function startGame() {
             if (!isGameRunning) return;
+            
+            // Start the Tone.js audio context on the first click
+            startAudioContext();
 
             isMoving = true;
             resultDisplay.classList.remove('show-result');
             stopButton.textContent = 'STOP!';
             stopButton.onclick = stopGame;
 
-            // Start the animation loop
             if (animationFrameId) {
                 cancelAnimationFrame(animationFrameId);
             }
             animationFrameId = requestAnimationFrame(gameLoop);
         }
 
-        /**
-         * Stops the movement and checks the result.
-         */
         function stopGame() {
             if (!isMoving || !isGameRunning) return;
 
@@ -338,10 +366,13 @@
             if (overlapPercent >= WIN_THRESHOLD) {
                 resultMessage.textContent = `PERFECT ALIGNMENT! You hit ${overlapPercent.toFixed(2)}% overlap!`;
                 resultDisplay.style.backgroundColor = 'rgba(0, 128, 0, 0.8)'; // Green for Win
+                playWinSound();
+                launchConfetti(); // Trigger confetti!
             } else {
                 const required = (WIN_THRESHOLD - overlapPercent).toFixed(2);
                 resultMessage.textContent = `MISSED IT! Only ${overlapPercent.toFixed(2)}% overlap. Try to get ${required}% closer.`;
                 resultDisplay.style.backgroundColor = 'rgba(204, 0, 0, 0.8)'; // Red for Loss
+                playLoseSound();
             }
 
             // 3. Update UI for next round
