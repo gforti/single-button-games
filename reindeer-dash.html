@@ -1,0 +1,681 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reindeer Run</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Mountains+of+Christmas:wght@700&family=Press+Start+2P&display=swap');
+
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            background-color: #0f2b1d; /* Dark Forest Green */
+            background-image: radial-gradient(circle, #0f2b1d 0%, #05140d 100%);
+            color: #fff;
+            font-family: 'Press Start 2P', cursive;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        #game-container {
+            width: 100%;
+            max-width: 400px; /* Standard mobile width */
+            height: 100vh;
+            max-height: 800px;
+            box-shadow: 0 0 40px rgba(255, 255, 255, 0.2);
+            border: 4px solid #c41e3a; /* Christmas Red border */
+            background-color: #fffafa; /* Snow */
+            position: relative;
+            overflow: hidden;
+        }
+
+        #game-canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            touch-action: none; /* Prevent browser actions on touch/swipe */
+        }
+
+        #overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(11, 61, 33, 0.85); /* Transparent Green */
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            transition: opacity 0.3s ease;
+            z-index: 10;
+        }
+
+        #overlay.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .score-display {
+            position: absolute;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #c41e3a; /* Red */
+            font-size: 1.2rem;
+            text-shadow: 0 0 2px #fff;
+            z-index: 5;
+        }
+
+        .high-score-display {
+            position: absolute;
+            top: 40px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #2e8b57;
+            font-size: 0.7rem;
+            z-index: 5;
+        }
+
+        h1 {
+            color: #fff;
+            font-family: 'Mountains of Christmas', cursive;
+            font-size: 2.5rem;
+            margin-bottom: 20px;
+            text-shadow: 0 2px 5px #c41e3a;
+        }
+
+        p {
+            font-size: 0.8rem;
+            margin-top: 10px;
+            margin-bottom: 20px;
+            max-width: 80%;
+            line-height: 1.5;
+        }
+
+        .main-button {
+            padding: 15px 30px;
+            font-size: 1rem;
+            background-color: #c41e3a;
+            color: #fff;
+            border: 4px solid #fff;
+            border-radius: 25px;
+            cursor: pointer;
+            box-shadow: 0 4px 0 #8a1529;
+            transition: all 0.1s;
+            font-family: 'Press Start 2P', cursive;
+        }
+
+        .main-button:active {
+            box-shadow: 0 2px 0 #8a1529;
+            transform: translateY(4px);
+        }
+
+        /* Responsive adjustments */
+        @media (max-width: 400px) {
+            h1 { font-size: 2rem; }
+            p { font-size: 0.6rem; }
+            .main-button { padding: 12px 24px; font-size: 0.7rem; }
+            .score-display { font-size: 1rem; }
+            .high-score-display { font-size: 0.6rem; }
+        }
+    </style>
+    <!-- Include Tone.js for audio management -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.min.js"></script>
+</head>
+<body>
+
+    <div id="game-container">
+        <!-- Score displays -->
+        <div class="score-display">SCORE: <span id="score">0</span></div>
+        <div class="high-score-display">HIGH: <span id="high-score">0</span></div>
+
+        <!-- The game canvas -->
+        <canvas id="game-canvas"></canvas>
+
+        <!-- Overlay for start/game over screen -->
+        <div id="overlay">
+            <h1 id="overlay-title">REINDEER RUN</h1>
+            <p id="overlay-message">Guide the reindeer! Press button or tap to switch paths. Avoid trees and logs!</p>
+            <button id="start-button" class="main-button">START RUN</button>
+        </div>
+    </div>
+
+    <script>
+        // --- GAME INITIALIZATION ---
+        const canvas = document.getElementById('game-canvas');
+        const ctx = canvas.getContext('2d');
+        const overlay = document.getElementById('overlay');
+        const overlayTitle = document.getElementById('overlay-title');
+        const overlayMessage = document.getElementById('overlay-message');
+        const startButton = document.getElementById('start-button');
+        const scoreDisplay = document.getElementById('score');
+        const highScoreDisplay = document.getElementById('high-score');
+
+        // Global game state
+        let game = {
+            isRunning: false,
+            score: 0,
+            highScore: 0,
+            animationFrameId: null,
+            lastTime: 0,
+            deltaTime: 0,
+            lastLaneSwitchTime: 0,
+            laneSwitchCooldown: 250, 
+            isGameOver: false,
+        };
+
+        // Configuration
+        const config = {
+            laneOffsets: [-1, 1], 
+            laneWidth: 200, 
+            // New Theme Colors
+            carColor: '#8B4513', // SaddleBrown (Reindeer)
+            roadColor: '#f0f8ff', // AliceBlue (Snow)
+            dividerColor: '#b0e0e6', // PowderBlue (Ice tracks)
+            
+            baseSpeed: 150, 
+            speedIncreaseRate: 0.08, 
+            obstacleSpawnRate: 1.2, 
+            minObstacleGap: 0.25, 
+            laneTransitionSpeed: 8,
+            
+            // Updated Obstacle Types for Christmas Theme
+            obstacleTypes: [
+                { type: 'tree', color: '#228B22', widthRatio: 0.6, heightRatio: 0.1, scoreValue: 10 },
+                { type: 'log', color: '#5D4037', widthRatio: 0.4, heightRatio: 0.03, scoreValue: 15 },
+                { type: 'snowman', color: '#ffffff', widthRatio: 0.5, heightRatio: 0.05, scoreValue: 20 }
+            ]
+        };
+
+        // Player object
+        let player = {
+            currentLane: 0, 
+            x: 0, 
+            targetX: 0, 
+            y: 0, 
+            width: 0,
+            height: 0,
+            targetRotation: 0,
+            currentRotation: 0,
+        };
+
+        // Obstacle array
+        let obstacles = [];
+        let timeSinceLastObstacle = 0;
+        
+        // --- AUDIO MANAGER ---
+        const Audio = (() => {
+            let switchSynth;
+            let crashNoise;
+
+            const ensureAudioContext = () => {
+                 if (Tone.context.state !== 'running') {
+                     Tone.start();
+                 }
+            };
+
+            const init = () => {
+                Tone.getDestination().volume.value = -10; 
+
+                // Slightly more bell-like tone for switch
+                switchSynth = new Tone.PolySynth(Tone.Synth, {
+                    envelope: {
+                        attack: 0.01,
+                        decay: 0.1,
+                        sustain: 0,
+                        release: 0.1
+                    },
+                    oscillator: {
+                        type: "sine"
+                    }
+                }).toDestination();
+
+                crashNoise = new Tone.NoiseSynth({
+                    noise: { type: "white" }, // White noise sounds more like crunching snow
+                    envelope: {
+                        attack: 0.01,
+                        decay: 0.3,
+                        sustain: 0,
+                        release: 0.1
+                    }
+                }).toDestination();
+            };
+
+            const playSwitch = () => {
+                ensureAudioContext();
+                try {
+                    // Jingle-ish sound
+                    switchSynth.triggerAttackRelease(["C6", "E6"], "16n");
+                } catch (e) { console.error("Audio failed:", e); }
+            };
+
+            const playCrash = () => {
+                ensureAudioContext();
+                try {
+                    crashNoise.triggerAttackRelease("4n");
+                } catch (e) { console.error("Audio failed:", e); }
+            };
+            
+            return { init, playSwitch, playCrash, ensureAudioContext };
+        })();
+        
+        Audio.init();
+
+        // --- UTILITY FUNCTIONS ---
+
+        function loadHighScore() {
+            const storedScore = localStorage.getItem('reindeerRunHighScore');
+            game.highScore = storedScore ? parseInt(storedScore) : 0;
+            highScoreDisplay.textContent = game.highScore;
+        }
+
+        function saveHighScore() {
+            if (game.score > game.highScore) {
+                game.highScore = game.score;
+                localStorage.setItem('reindeerRunHighScore', game.highScore);
+                highScoreDisplay.textContent = game.highScore;
+            }
+        }
+
+        function resizeCanvas() {
+            const container = document.getElementById('game-container');
+            canvas.width = container.clientWidth;
+            canvas.height = container.clientHeight;
+
+            player.width = Math.max(20, Math.min(canvas.width * 0.1, 40)); 
+            player.height = Math.max(40, Math.min(canvas.height * 0.1, 80));
+            player.y = canvas.height * 0.85; 
+            
+            player.targetX = getLaneX(player.currentLane);
+            player.x = player.targetX; 
+        }
+
+        function getLaneX(laneIndex) {
+            const offsetMultiplier = config.laneOffsets[laneIndex]; 
+            return canvas.width / 2 + (offsetMultiplier * config.laneWidth / 2);
+        }
+
+        // --- GAME LOGIC ---
+
+        function initGame() {
+            loadHighScore();
+            resizeCanvas(); 
+            window.addEventListener('resize', resizeCanvas);
+            
+            game.isRunning = false;
+            game.score = 0;
+            game.isGameOver = false;
+            obstacles = [];
+            timeSinceLastObstacle = 0;
+            scoreDisplay.textContent = Math.floor(game.score);
+
+            player.currentLane = 0;
+            player.targetX = getLaneX(player.currentLane); 
+            player.x = player.targetX; 
+
+            overlayTitle.textContent = "REINDEER RUN";
+            overlayMessage.innerHTML = "Guide the reindeer! Press button or tap to switch paths. Avoid trees and logs!";
+            overlay.classList.remove('hidden');
+        }
+
+        function startGame() {
+            if (game.isRunning) return;
+
+            game.isRunning = true;
+            game.isGameOver = false;
+            game.score = 0;
+            game.lastTime = performance.now();
+            obstacles = [];
+            timeSinceLastObstacle = 0;
+            overlay.classList.add('hidden');
+            
+            Audio.ensureAudioContext();
+
+            player.currentLane = 0;
+            player.targetX = getLaneX(player.currentLane);
+            player.x = player.targetX;
+            player.currentRotation = 0;
+            player.targetRotation = 0;
+
+            gameLoop(game.lastTime); 
+        }
+
+        function gameOver() {
+            if (game.isGameOver) return;
+            game.isGameOver = true;
+            game.isRunning = false;
+
+            cancelAnimationFrame(game.animationFrameId);
+            saveHighScore();
+            
+            Audio.playCrash();
+
+            overlayTitle.textContent = "OH NO! CRASHED!";
+            overlayMessage.innerHTML = `Final Score: ${Math.floor(game.score)}<br><br>High Score: ${game.highScore}<br><br>Press START to try again!`;
+            overlay.classList.remove('hidden');
+        }
+
+        function switchLane() {
+            const now = performance.now();
+            if (game.isRunning && (now - game.lastLaneSwitchTime > game.laneSwitchCooldown)) {
+                
+                const previousLane = player.currentLane;
+                player.currentLane = 1 - player.currentLane; 
+                
+                player.targetRotation = (player.currentLane > previousLane) ? 0.15 : -0.15;
+                player.targetX = getLaneX(player.currentLane); 
+                game.lastLaneSwitchTime = now;
+                
+                Audio.playSwitch();
+            }
+        }
+
+        function update(deltaTime) {
+            if (!game.isRunning) return;
+
+            const scoreRate = 0.05;
+            const speedMultiplier = 1 + Math.floor(game.score) * config.speedIncreaseRate / 100;
+            const currentSpeed = config.baseSpeed * speedMultiplier; 
+
+            game.score += deltaTime * scoreRate * currentSpeed;
+            scoreDisplay.textContent = Math.floor(game.score);
+
+            const movementAmount = (player.targetX - player.x) * config.laneTransitionSpeed * deltaTime;
+            player.x += movementAmount;
+
+            player.currentRotation += (player.targetRotation - player.currentRotation) * 10 * deltaTime;
+            if (Math.abs(player.currentRotation) < 0.01) {
+                player.currentRotation = 0;
+                player.targetRotation = 0;
+            }
+
+            // Obstacle Generation
+            timeSinceLastObstacle += deltaTime;
+            const spawnInterval = 1 / config.obstacleSpawnRate; 
+
+            if (timeSinceLastObstacle >= spawnInterval) {
+                let shouldSpawn = true;
+                
+                if (obstacles.length > 0) {
+                    const lastObstacleY = obstacles[obstacles.length - 1].y;
+                    const minGapY = canvas.height * config.minObstacleGap; 
+                    
+                    if (lastObstacleY < minGapY) { 
+                        shouldSpawn = false;
+                    }
+                }
+                
+                if (shouldSpawn) {
+                    timeSinceLastObstacle = 0;
+
+                    const laneIndex = Math.floor(Math.random() * 2); 
+                    const obstacleType = config.obstacleTypes[Math.floor(Math.random() * config.obstacleTypes.length)];
+
+                    const obsWidth = config.laneWidth * 0.45 * obstacleType.widthRatio;
+                    const obsHeight = player.height * (obstacleType.heightRatio / 0.1);
+
+                    const obs = {
+                        lane: laneIndex,
+                        type: obstacleType.type,
+                        x: getLaneX(laneIndex),
+                        y: -obsHeight, 
+                        width: obsWidth,
+                        height: obsHeight,
+                        color: obstacleType.color,
+                        scoreValue: obstacleType.scoreValue,
+                    };
+                    obstacles.push(obs);
+                }
+            }
+
+            // Obstacle Update
+            for (let i = obstacles.length - 1; i >= 0; i--) {
+                const obs = obstacles[i];
+                
+                obs.y += currentSpeed * deltaTime;
+
+                if (obs.lane === player.currentLane) {
+                    const playerLeft = player.x - player.width / 2;
+                    const playerRight = player.x + player.width / 2;
+                    const playerTop = player.y - player.height / 2;
+                    const playerBottom = player.y + player.height / 2;
+
+                    const obsLeft = obs.x - obs.width / 2;
+                    const obsRight = obs.x + obs.width / 2;
+                    const obsTop = obs.y - obs.height / 2;
+                    const obsBottom = obs.y + obs.height / 2;
+
+                    if (playerLeft < obsRight && playerRight > obsLeft &&
+                        playerTop < obsBottom && playerBottom > obsTop) {
+                        
+                        gameOver();
+                        return; 
+                    }
+                }
+
+                if (obs.y > canvas.height + obs.height) {
+                    obstacles.splice(i, 1);
+                }
+            }
+        }
+
+        // --- DRAWING FUNCTIONS ---
+
+        function drawRoad() {
+            // Snowy Road Background
+            ctx.fillStyle = config.roadColor;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            const centerLineX = canvas.width / 2;
+            const dividerWidth = 8;
+            const segmentHeight = 40;
+            const gapHeight = 40;
+            const totalSegment = segmentHeight + gapHeight;
+            
+            // Draw icy tracks
+            ctx.fillStyle = config.dividerColor;
+            
+            // Side borders (representing snow banks)
+            ctx.fillRect(centerLineX - config.laneWidth - 20, 0, 20, canvas.height);
+            ctx.fillRect(centerLineX + config.laneWidth, 0, 20, canvas.height);
+
+            const scrollOffset = (game.score * 10) % totalSegment;
+
+            // Dashed center line (fainter for snow look)
+            for (let i = Math.floor(-canvas.height / totalSegment) - 1; i < canvas.height / totalSegment + 1; i++) {
+                const y = Math.floor(i * totalSegment + scrollOffset);
+                ctx.fillRect(centerLineX - dividerWidth / 2, y, dividerWidth, segmentHeight);
+            }
+        }
+
+        function drawPlayer() {
+            ctx.save();
+            ctx.translate(player.x, player.y);
+            ctx.rotate(player.currentRotation);
+
+            // Reindeer Body (Brown Oval-ish Rect)
+            ctx.fillStyle = config.carColor;
+            // Rounded rectangle hack
+            ctx.beginPath();
+            ctx.roundRect(-player.width / 2, -player.height / 2, player.width, player.height, 10);
+            ctx.fill();
+
+            // Reindeer Head
+            ctx.fillStyle = '#5C3317'; // Darker brown
+            ctx.beginPath();
+            ctx.arc(0, -player.height * 0.1, player.width * 0.4, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Red Nose (Rudolph!)
+            ctx.fillStyle = '#FF0000';
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = 'red';
+            ctx.beginPath();
+            ctx.arc(0, -player.height * 0.1 - 5, player.width * 0.15, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.shadowBlur = 0;
+
+            // Antlers
+            ctx.strokeStyle = '#D2B48C'; // Tan
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            // Left Antler
+            ctx.moveTo(-player.width * 0.2, -player.height * 0.1 - 5);
+            ctx.lineTo(-player.width * 0.5, -player.height * 0.4);
+            ctx.lineTo(-player.width * 0.3, -player.height * 0.5);
+            // Right Antler
+            ctx.moveTo(player.width * 0.2, -player.height * 0.1 - 5);
+            ctx.lineTo(player.width * 0.5, -player.height * 0.4);
+            ctx.lineTo(player.width * 0.3, -player.height * 0.5);
+            ctx.stroke();
+
+            ctx.restore();
+        }
+
+        function drawObstacle(obs) {
+            ctx.save();
+            ctx.translate(obs.x, obs.y);
+
+            // Shadow on snow
+            ctx.fillStyle = 'rgba(0,0,0,0.1)';
+            ctx.beginPath();
+            ctx.ellipse(0, obs.height/2, obs.width/2, obs.height/4, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            if (obs.type === 'tree') {
+                // Christmas Tree (Stacked Triangles)
+                ctx.fillStyle = obs.color;
+                
+                // Bottom tier
+                ctx.beginPath();
+                ctx.moveTo(-obs.width/2, obs.height/2);
+                ctx.lineTo(obs.width/2, obs.height/2);
+                ctx.lineTo(0, -obs.height * 0.2);
+                ctx.fill();
+
+                // Middle tier
+                ctx.beginPath();
+                ctx.moveTo(-obs.width/2.5, 0);
+                ctx.lineTo(obs.width/2.5, 0);
+                ctx.lineTo(0, -obs.height/2);
+                ctx.fill();
+                
+                // Ornaments (dots)
+                ctx.fillStyle = 'gold';
+                ctx.beginPath();
+                ctx.arc(-5, 10, 3, 0, Math.PI*2);
+                ctx.arc(5, -10, 3, 0, Math.PI*2);
+                ctx.fill();
+                ctx.fillStyle = 'red';
+                ctx.beginPath();
+                ctx.arc(6, 15, 3, 0, Math.PI*2);
+                ctx.arc(-6, -5, 3, 0, Math.PI*2);
+                ctx.fill();
+
+            } else if (obs.type === 'log') {
+                // Fallen Log
+                ctx.fillStyle = obs.color;
+                ctx.fillRect(-obs.width / 2, -obs.height / 2, obs.width, obs.height);
+                
+                // Wood texture lines
+                ctx.strokeStyle = '#3E2723';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(-obs.width/2 + 5, -obs.height/2);
+                ctx.lineTo(-obs.width/2 + 5, obs.height/2);
+                ctx.stroke();
+                
+            } else if (obs.type === 'snowman') {
+                // Snowman (Stacked Circles)
+                ctx.fillStyle = 'white';
+                ctx.strokeStyle = '#ddd';
+                ctx.lineWidth = 1;
+                
+                // Bottom
+                ctx.beginPath();
+                ctx.arc(0, obs.height * 0.2, obs.width * 0.3, 0, Math.PI*2);
+                ctx.fill();
+                ctx.stroke();
+
+                // Head
+                ctx.beginPath();
+                ctx.arc(0, -obs.height * 0.2, obs.width * 0.2, 0, Math.PI*2);
+                ctx.fill();
+                ctx.stroke();
+                
+                // Carrot nose
+                ctx.fillStyle = 'orange';
+                ctx.beginPath();
+                ctx.arc(0, -obs.height * 0.2, 3, 0, Math.PI*2);
+                ctx.fill();
+            }
+
+            ctx.restore();
+        }
+
+        // --- MAIN GAME LOOP ---
+
+        function gameLoop(currentTime) {
+            if (game.lastTime === 0 && currentTime) {
+                game.lastTime = currentTime;
+            }
+
+            if (!game.isRunning) return;
+
+            game.deltaTime = (currentTime - game.lastTime) / 1000;
+            game.lastTime = currentTime;
+            
+            if (game.deltaTime > 0.1) game.deltaTime = 0.016; 
+
+            update(game.deltaTime);
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            drawRoad();
+            obstacles.forEach(drawObstacle);
+            drawPlayer();
+
+            game.animationFrameId = requestAnimationFrame(gameLoop);
+        }
+
+        // --- INPUT HANDLING ---
+
+        function handleInput(event) {
+            if (event.type === 'touchstart' || event.type === 'click' || event.code) {
+                 event.preventDefault();
+            }
+
+            if (game.isGameOver) {
+                startGame();
+            } else if (game.isRunning) {
+                switchLane();
+            } else {
+                startGame();
+            }
+        }
+
+        // --- EVENT LISTENERS ---
+
+        startButton.addEventListener('click', handleInput);
+        canvas.addEventListener('click', handleInput);
+        canvas.addEventListener('touchstart', handleInput, { passive: false });
+
+        document.addEventListener('keydown', (event) => {
+            if (event.code === 'Space' || event.code === 'Enter' || event.code.startsWith('Arrow')) {
+                handleInput(event);
+            }
+        });
+
+        // --- START APPLICATION ---
+        window.onload = function() {
+            initGame();
+        };
+
+    </script>
+</body>
+</html>
