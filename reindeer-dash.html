@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Reindeer Run</title>
+    <title>Reindeer Dash</title>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Mountains+of+Christmas:wght@700&family=Press+Start+2P&display=swap');
 
@@ -140,7 +140,7 @@
 
         <!-- Overlay for start/game over screen -->
         <div id="overlay">
-            <h1 id="overlay-title">REINDEER RUN</h1>
+            <h1 id="overlay-title">REINDEER DASH</h1>
             <p id="overlay-message">Guide the reindeer! Press button or tap to switch paths. Avoid trees and logs!</p>
             <button id="start-button" class="main-button">START RUN</button>
         </div>
@@ -319,7 +319,7 @@
             player.targetX = getLaneX(player.currentLane); 
             player.x = player.targetX; 
 
-            overlayTitle.textContent = "REINDEER RUN";
+            overlayTitle.textContent = "REINDEER DASH";
             overlayMessage.innerHTML = "Guide the reindeer! Press button or tap to switch paths. Avoid trees and logs!";
             overlay.classList.remove('hidden');
         }
@@ -368,12 +368,13 @@
                 const previousLane = player.currentLane;
                 player.currentLane = 1 - player.currentLane; 
                 
-                player.targetRotation = (player.currentLane > previousLane) ? 0.15 : -0.15;
+                player.targetRotation = (player.currentLane > previousLane) ? 0.20 : -0.20;
                 player.targetX = getLaneX(player.currentLane); 
                 game.lastLaneSwitchTime = now;
                 
                 Audio.playSwitch();
             }
+
         }
 
         function update(deltaTime) {
@@ -390,7 +391,8 @@
             player.x += movementAmount;
 
             player.currentRotation += (player.targetRotation - player.currentRotation) * 10 * deltaTime;
-            if (Math.abs(player.currentRotation) < 0.01) {
+            const now = performance.now();
+            if ((now - game.lastLaneSwitchTime > game.laneSwitchCooldown)) {
                 player.currentRotation = 0;
                 player.targetRotation = 0;
             }
@@ -498,6 +500,39 @@
             ctx.save();
             ctx.translate(player.x, player.y);
             ctx.rotate(player.currentRotation);
+       
+            // -- ANIMATED FEET --
+            // Calculate leg swing based on time
+            const swingSpeed = 0.02; 
+            const legSwing = Math.sin(performance.now() * swingSpeed) * 6; // Amplitude of swing
+
+            ctx.fillStyle = '#3E2723'; // Dark Brown for Hooves
+
+            // Draw 4 legs, oscillating
+            // Front Left & Back Right move together
+            // Front Right & Back Left move together (opposite phase)
+
+            const FEET_POSITION = 0.6
+            // Front Left
+            ctx.beginPath();
+            ctx.ellipse(-player.width * FEET_POSITION, -player.height * 0.3 + legSwing, 4, 6, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Front Right
+            ctx.beginPath();
+            ctx.ellipse(player.width * FEET_POSITION, -player.height * 0.3 - legSwing, 4, 6, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Back Left
+            ctx.beginPath();
+            ctx.ellipse(-player.width * FEET_POSITION, player.height * 0.3 - legSwing, 4, 6, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Back Right
+            ctx.beginPath();
+            ctx.ellipse(player.width * FEET_POSITION, player.height * 0.3 + legSwing, 4, 6, 0, 0, Math.PI * 2);
+            ctx.fill();
+
 
             // Reindeer Body (Brown Oval-ish Rect)
             ctx.fillStyle = config.carColor;
