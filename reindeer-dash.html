@@ -180,7 +180,7 @@
             dividerColor: '#b0e0e6', // PowderBlue (Ice tracks)
             
             baseSpeed: 150, 
-            speedIncreaseRate: 0.08, 
+            speedIncreaseRate: 0.50, 
             obstacleSpawnRate: 1.2, 
             minObstacleGap: 0.25, 
             laneTransitionSpeed: 8,
@@ -271,15 +271,15 @@
 
         function loadHighScore() {
             const storedScore = localStorage.getItem('reindeerRunHighScore');
-            game.highScore = storedScore ? parseInt(storedScore) : 0;
-            highScoreDisplay.textContent = game.highScore;
+            game.highScore = storedScore ? parseInt(storedScore, 10) : 0;
+            highScoreDisplay.textContent = Math.floor(game.highScore);
         }
 
         function saveHighScore() {
             if (game.score > game.highScore) {
                 game.highScore = game.score;
                 localStorage.setItem('reindeerRunHighScore', game.highScore);
-                highScoreDisplay.textContent = game.highScore;
+                highScoreDisplay.textContent = Math.floor(game.highScore);
             }
         }
 
@@ -357,7 +357,7 @@
             Audio.playCrash();
 
             overlayTitle.textContent = "OH NO! CRASHED!";
-            overlayMessage.innerHTML = `Final Score: ${Math.floor(game.score)}<br><br>High Score: ${game.highScore}<br><br>Press START to try again!`;
+            overlayMessage.innerHTML = `Final Score: ${Math.floor(game.score)}<br><br>High Score: ${Math.floor(game.highScore)}<br><br>Press START to try again!`;
             overlay.classList.remove('hidden');
         }
 
